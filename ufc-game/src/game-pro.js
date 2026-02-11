@@ -53,6 +53,7 @@ const FIGHTERS = [
 ];
 
 let scene, camera, renderer, fighters = [], crowdParticles = [];
+let particleSystem, impactEffects = [];
 let gameState = { isPlaying: false, round: 1, time: CONFIG.ROUND_TIME };
 let clock = new THREE.Clock();
 
@@ -76,6 +77,7 @@ function init() {
     createOctagon();
     createCrowd();
     createAtmosphere();
+    createParticleSystem();
     
     render();
 }
@@ -240,6 +242,96 @@ function createAtmosphere() {
     );
     ramp.position.set(0, 0.1, 18);
     scene.add(ramp);
+}
+
+// PARTICLE EFFECTS SYSTEM
+function createParticleSystem() {
+    // System for sweat/blood particles
+    const particleCount = 200;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const velocities = new Float32Array(particleCount * 3);
+    const lifetimes = new Float32Array(particleCount);
+    
+    for (let i = 0; i < particleCount; i++) {
+        positions[i * 3] = 0;
+        positions[i * 3 + 1] = -1000; // Hide initially
+        positions[i * 3 + 2] = 0;
+        velocities[i * 3] = 0;
+        velocities[i * 3 + 1] = 0;
+        velocities[i * 3 + 2] = 0;
+        lifetimes[i] = 0;
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    const material = new THREE.PointsMaterial({
+        color: 0xffffaa,
+        size: 0.08,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending
+    });
+    
+    particleSystem = new THREE.Points(geometry, material);
+    particleSystem.userData = { velocities, lifetimes, nextParticle: 0 };
+    scene.add(particleSystem);
+}
+
+function spawnImpactParticles(position, intensity = 1) {
+    const count = Math.floor(10 * intensity);
+    const positions = particleSystem.geometry.attributes.position.array;
+    const velocities = particleSystem.userData.velocities;
+    const lifetimes = particleSystem.userData.lifetimes;
+    let nextIdx = particleSystem.userData.nextParticle;
+    
+    for (let i = 0; i < count; i++) {
+        const idx = (nextIdx + i) % 200;
+        
+        // Spawn at impact point
+        positions[idx * 3] = position.x + (Math.random() - 0.5) * 0.3;
+        positions[idx * 3 + 1] = position.y + 1.8 + (Math.random() - 0.5) * 0.2;
+        positions[idx * 3 + 2] = position.z + (Math.random() - 0.5) * 0.3;
+        
+        // Explode outward
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 0.1 + Math.random() * 0.15 * intensity;
+        velocities[idx * 3] = Math.cos(angle) * speed;
+        velocities[idx * 3 + 1] = 0.05 + Math.random() * 0.1;
+        velocities[idx * 3 + 2] = Math.sin(angle) * speed;
+        
+        lifetimes[idx] = 30 + Math.random() * 20;
+    }
+    
+    particleSystem.userData.nextParticle = (nextIdx + count) % 200;
+    particleSystem.geometry.attributes.position.needsUpdate = true;
+}
+
+function updateParticles() {
+    if (!particleSystem) return;
+    
+    const positions = particleSystem.geometry.attributes.position.array;
+    const velocities = particleSystem.userData.velocities;
+    const lifetimes = particleSystem.userData.lifetimes;
+    
+    for (let i = 0; i < 200; i++) {
+        if (lifetimes[i] > 0) {
+            lifetimes[i]--;
+            
+            positions[i * 3] += velocities[i * 3];
+            positions[i * 3 + 1] += velocities[i * 3 + 1];
+            positions[i * 3 + 2] += velocities[i * 3 + 2];
+            
+            // Gravity
+            velocities[i * 3 + 1] -= 0.005;
+            
+            if (lifetimes[i] <= 0) {
+                positions[i * 3 + 1] = -1000;
+            }
+        }
+    }
+    
+    particleSystem.geometry.attributes.position.needsUpdate = true;
 }
 
 // PRO FIGHTER MODEL with animation-ready parts
@@ -704,6 +796,11 @@ async function animateHitReaction(fighter, damage) {
     
     // Screen shake
     shakeCamera(damage / 10);
+    
+    // Particle effects for big hits
+    if (damage > 8) {
+        spawnImpactParticles(fighter.position, damage / 10);
+    }
 }
 
 async function animateKnockout(loser) {
@@ -728,6 +825,17 @@ async function animateKnockout(loser) {
     gsap.to(loser.userData.rightArm.rotation, {
         z: -1.5,
         duration: 1
+    });
+    
+    // Big particle explosion
+    spawnImpactParticles(loser.position, 3);
+    
+    // Dramatic camera zoom
+    gsap.to(camera.position, {
+        y: 4,
+        z: 8,
+        duration: 1,
+        ease: "power2.in"
     });
 }
 
@@ -907,6 +1015,9 @@ function render() {
         crowd.rotation.y = time * 0.05;
         crowd.position.y = Math.sin(time * 0.5) * 0.2;
     });
+    
+    // Update particles
+    updateParticles();
     
     // Fighters face each other
     if (fighters.length === 2) {
