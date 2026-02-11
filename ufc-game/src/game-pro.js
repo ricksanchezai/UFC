@@ -598,10 +598,19 @@ function startEntrance() {
 }
 
 function startFight() {
+    console.log('🔥 FIGHT STARTED! isPlaying=' + gameState.isPlaying);
     gameState.isPlaying = true;
     showCommentary("IT'S TIME! FIGHT!", 3000);
+    
+    // Start timer immediately
     updateTimer();
-    setInterval(updateTimer, 1000);
+    const timerInterval = setInterval(() => {
+        if (gameState.isPlaying) {
+            updateTimer();
+        } else {
+            clearInterval(timerInterval);
+        }
+    }, 1000);
     
     // Start AI fight loop
     aiCombatLoop();
@@ -1031,54 +1040,6 @@ function render() {
     }
     
     renderer.render(scene, camera);
-}
-
-// Start the actual fight!
-function startFight() {
-    console.log('🔥 FIGHT STARTED!');
-    gameState.isPlaying = true;
-    showCommentary("IT'S TIME! FIGHT!", 3000);
-    
-    // Start AI battle loop
-    setTimeout(aiBattleLoop, 2000);
-}
-
-// AI vs AI battle loop
-async function aiBattleLoop() {
-    if (!gameState.isPlaying || fighters.length < 2) return;
-    
-    const f1 = fighters[0];
-    const f2 = fighters[1];
-    
-    // Distance between fighters
-    const dist = f1.position.distanceTo(f2.position);
-    
-    // Fighter 1 acts
-    if (f1.userData.stamina > 10 && Math.random() < 0.7) {
-        const action = selectAIAction(f1.userData, dist);
-        await performAttack(0, action);
-    } else if (f1.userData.stamina < 20) {
-        // Regain stamina
-        f1.userData.stamina = Math.min(100, f1.userData.stamina + 5);
-        updateUI();
-    }
-    
-    // Small delay between actions
-    await new Promise(r => setTimeout(r, 500 + Math.random() * 1000));
-    
-    // Fighter 2 acts
-    if (gameState.isPlaying && f2.userData.stamina > 10 && Math.random() < 0.7) {
-        const action = selectAIAction(f2.userData, dist);
-        await performAttack(1, action);
-    } else if (f2.userData.stamina < 20) {
-        f2.userData.stamina = Math.min(100, f2.userData.stamina + 5);
-        updateUI();
-    }
-    
-    // Continue loop
-    if (gameState.isPlaying) {
-        setTimeout(aiBattleLoop, 500 + Math.random() * 1500);
-    }
 }
 
 // INPUT
