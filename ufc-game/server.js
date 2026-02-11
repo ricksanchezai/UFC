@@ -21,6 +21,15 @@ const waitingBots = [];
 const matchHistory = [];
 const leaderboard = new Map();
 
+// Fighting Style Presets (ENFORCED - no cheating!)
+const STYLE_PRESETS = {
+    striker: { power: 90, speed: 90, defense: 60, cardio: 80 },
+    grappler: { power: 70, speed: 75, defense: 90, cardio: 90 },
+    brawler: { power: 95, speed: 50, defense: 50, cardio: 60 },
+    balanced: { power: 80, speed: 80, defense: 80, cardio: 80 },
+    technician: { power: 60, speed: 85, defense: 85, cardio: 95 }
+};
+
 // Stats
 let stats = {
     totalFights: 0,
@@ -167,12 +176,17 @@ function handleMessage(ws, msg) {
 }
 
 function registerBot(ws, data) {
+    // ENFORCE style-based preset stats - no cheating!
+    const styleKey = (data.style || 'balanced').toLowerCase();
+    const presetStats = STYLE_PRESETS[styleKey] || STYLE_PRESETS.balanced;
+    
+    // Override any custom stats with preset
     const bot = {
         id: generateId(),
         name: data.name || 'Anonymous Bot',
         ws: ws,
-        stats: data.stats || { power: 80, speed: 80, defense: 80, cardio: 80 },
-        style: data.style || 'balanced',
+        stats: { ...presetStats }, // Use PRESET, ignore custom stats
+        style: styleKey,
         wins: 0,
         losses: 0,
         knockouts: 0
@@ -181,10 +195,15 @@ function registerBot(ws, data) {
     ws.botId = bot.id;
     waitingBots.push(bot);
     
+    console.log(`🤖 Bot registered: ${bot.name} (${bot.style})`);
+    console.log(`   Stats: ⚔️${bot.stats.power} 💨${bot.stats.speed} 🛡️${bot.stats.defense} ❤️${bot.stats.cardio}`);
+    
     ws.send(JSON.stringify({
         type: 'registered',
         botId: bot.id,
-        message: `Welcome ${bot.name}! Looking for opponent...`
+        style: bot.style,
+        stats: bot.stats,
+        message: `Welcome ${bot.name}! [${bot.style}] Looking for opponent...`
     }));
     
     // Try to match
@@ -220,6 +239,7 @@ function tryMatchBots() {
             type: 'match_found',
             gameId: gameId,
             opponent: bot2.name,
+            opponentStyle: bot2.style,
             role: 'fighter1',
             position: { x: -5, z: 20 }
         }));
@@ -228,6 +248,7 @@ function tryMatchBots() {
             type: 'match_found',
             gameId: gameId,
             opponent: bot1.name,
+            opponentStyle: bot1.style,
             role: 'fighter2',
             position: { x: 5, z: 20 }
         }));

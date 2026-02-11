@@ -10,15 +10,53 @@
  * 
  * Options:
  *   --name     AI name
- *   --style    Fighting style (striker|grappler|brawler|balanced)
+ *   --style    Fighting style (striker|grappler|brawler|balanced|technician)
  *   --server   WebSocket URL of UFC server
- *   --power    Power stat (0-100)
- *   --speed    Speed stat (0-100)
- *   --def      Defense stat (0-100)
- *   --cardio   Cardio stat (0-100)
+ * 
+ * STYLES HAVE PRESET STATS - you can't just max everything!
+ * Each style has strengths and weaknesses:
+ *   - Striker: Fast & powerful but weak defense
+ *   - Grappler: Great defense & cardio but weaker power
+ *   - Brawler: Extreme damage but glass cannon
+ *   - Balanced: No weaknesses but no strengths
+ *   - Technician: Never gets tired, great defense, weak hits
  */
 
 const WebSocket = require('ws');
+
+// FIGHTING STYLE PRESETS - Pick one, live with the tradeoffs!
+const STYLE_PRESETS = {
+  striker: {
+    name: 'Striker',
+    desc: 'Fast & Aggressive - High damage but glass jaw',
+    stats: { power: 90, speed: 90, defense: 60, cardio: 80 },
+    moves: ['jab', 'cross', 'hook', 'kick', 'uppercut']
+  },
+  grappler: {
+    name: 'Grappler', 
+    desc: 'Technical & Defensive - Wears opponents down',
+    stats: { power: 70, speed: 75, defense: 90, cardio: 90 },
+    moves: ['takedown', 'hook', 'jab', 'block']
+  },
+  brawler: {
+    name: 'Brawler',
+    desc: 'Heavy Hitter - Glass cannon, one shot can end it',
+    stats: { power: 95, speed: 50, defense: 50, cardio: 60 },
+    moves: ['hook', 'uppercut', 'hook', 'cross', 'kick']
+  },
+  balanced: {
+    name: 'Balanced',
+    desc: 'All-Rounder - No weakness, no strength',
+    stats: { power: 80, speed: 80, defense: 80, cardio: 80 },
+    moves: ['jab', 'cross', 'hook', 'kick', 'block']
+  },
+  technician: {
+    name: 'Technician',
+    desc: 'The Marathoner - Never gasses, great D, weak power',
+    stats: { power: 60, speed: 85, defense: 85, cardio: 95 },
+    moves: ['jab', 'jab', 'cross', 'block', 'takedown']
+  }
+};
 
 // Simple CLI argument parser
 const args = {};
@@ -28,23 +66,31 @@ process.argv.slice(2).forEach((arg, i, arr) => {
   }
 });
 
+// Validate fighting style
+const rawStyle = (args.style || process.env.AI_STYLE || 'balanced').toLowerCase();
+const STYLE = STYLE_PRESETS[rawStyle] || STYLE_PRESETS.balanced;
+
 // Configuration
 const CONFIG = {
   name: args.name || process.env.AI_NAME || 'Unknown AI',
-  style: args.style || process.env.AI_STYLE || 'balanced',
+  style: rawStyle,
+  styleData: STYLE,
   server: args.server || process.env.UFC_SERVER || 'ws://localhost:3000',
-  stats: {
-    power: parseInt(args.power || process.env.AI_POWER || 80),
-    speed: parseInt(args.speed || process.env.AI_SPEED || 80),
-    defense: parseInt(args.def || process.env.AI_DEF || 80),
-    cardio: parseInt(args.cardio || process.env.AI_CARDIO || 80)
-  }
+  stats: STYLE.stats  // PRESET - cannot be customized!
 };
 
 console.log(`🥊 ${CONFIG.name} initializing...`);
-console.log(`   Style: ${CONFIG.style}`);
-console.log(`   Stats: Power=${CONFIG.stats.power} Speed=${CONFIG.stats.speed} Def=${CONFIG.stats.defense} Cardio=${CONFIG.stats.cardio}`);
+console.log(`   ╔══════════════════════════════════════════╗`);
+console.log(`   ║  STYLE: ${STYLE.name.padEnd(15)} ║`);
+console.log(`   ║  ${STYLE.desc.substring(0, 36).padEnd(36)} ║`);
+console.log(`   ╠══════════════════════════════════════════╣`);
+console.log(`   ║  ⚔️ POWER   ${CONFIG.stats.power.toString().padStart(3)}/100               ║`);
+console.log(`   ║  💨 SPEED   ${CONFIG.stats.speed.toString().padStart(3)}/100               ║`);
+console.log(`   ║  🛡️ DEFENSE ${CONFIG.stats.defense.toString().padStart(3)}/100               ║`);
+console.log(`   ║  ❤️ CARDIO  ${CONFIG.stats.cardio.toString().padStart(3)}/100               ║`);
+console.log(`   ╚══════════════════════════════════════════╝`);
 console.log(`   Server: ${CONFIG.server}`);
+console.log(`\n⚠️  Stats are FIXED by style - no cheating!\n`);
 
 // State
 let ws = null;
@@ -54,6 +100,7 @@ let inFight = false;
 let health = 100;
 let stamina = 100;
 let opponent = null;
+let opponentStyle = null;
 
 // Connect function
 function connect() {
@@ -108,7 +155,7 @@ function handleMessage(msg) {
       
     case 'registered':
       botId = msg.botId;
-      console.log(`\n🤖 Registered as ${CONFIG.name}`);
+      console.log(`\n🤖 Registered as "${CONFIG.name}" (${STYLE.name})`);
       console.log(`   Bot ID: ${botId}`);
       console.log(`   Waiting for opponent...\n`);
       break;
@@ -116,8 +163,11 @@ function handleMessage(msg) {
     case 'match_found':
       gameId = msg.gameId;
       opponent = msg.opponent;
+      opponentStyle = msg.opponentStyle || 'unknown';
       console.log('⚔️  MATCH FOUND!');
-      console.log(`   ${CONFIG.name} vs ${opponent}`);
+      console.log(`   ${CONFIG.name} [${STYLE.name}]`);
+      console.log(`   vs`);
+      console.log(`   ${opponent} [${opponentStyle}]`);
       console.log(`   ${msg.role} | Entering the Octagon...\n`);
       break;
       
@@ -136,48 +186,58 @@ function handleMessage(msg) {
       
     case 'action_result':
       if (msg.hit) {
-        if (msg.actor === CONFIG.name) {
-          console.log(`✅ ${msg.action.toUpperCase()} HITS! (Opponent health: ${msg.health2 || msg.health1})`);
+        const isMe = msg.actor === CONFIG.name;
+        const actionEmoji = {
+          jab: '🥊', cross: '💥', hook: '🔄', 
+          uppercut: '⬆️', kick: '🦵', takedown: '🤼', block: '🛡️'
+        }[msg.action] || '👊';
+        
+        if (isMe) {
+          console.log(`✅ ${actionEmoji} ${msg.action.toUpperCase()} HITS!`);
+          console.log(`   Opponent health: ${msg.opponentHealth}%`);
         } else {
-          console.log(`💥 HIT BY ${msg.actor}'s ${msg.action.toUpperCase()}! (Your health: ${msg.health1 || msg.health2})`);
+          console.log(`💥 ${actionEmoji} HIT BY ${msg.actor}'s ${msg.action.toUpperCase()}!`);
+          console.log(`   Your health: ${msg.myHealth}%`);
         }
       } else {
-        console.log(`${msg.actor} uses ${msg.action}... MISS`);
-      }
-      
-      // Update our state based on role
-      if (msg.health1 !== undefined) {
-        if (botId) { // We determine which is ours by who dealt damage
-          health = msg.health1 === health ? msg.health1 : msg.health2;
-          stamina = msg.stamina1 === stamina ? msg.stamina1 : msg.stamina2;
+        if (msg.actor === CONFIG.name) {
+          console.log(`❌ ${msg.action.toUpperCase()} missed...`);
         }
       }
+      
+      // Update our tracked state
+      if (msg.myHealth !== undefined) health = msg.myHealth;
+      if (msg.myStamina !== undefined) stamina = msg.myStamina;
       break;
       
     case 'timer_tick':
-      // Time update
+      // Time update - could display if we wanted
       break;
       
     case 'round_end':
-      console.log(`
-⏸️  ROUND ${msg.round} END - Rest 60 seconds`);
+      console.log(`\n⏸️  ROUND ${msg.round} END - Going to corner...`);
+      stamina = Math.min(100, stamina + 30); // Corner rest
       break;
       
     case 'fight_end':
       inFight = false;
       const won = msg.winner === CONFIG.name;
       
-      console.log(`\n${won ? '🏆🏆🏆 VICTORY!' : '💔 DEFEAT!'}`);
+      console.log(`\n${'='.repeat(40)}`);
+      console.log(`${won ? '🏆 VICTORY!' : '💔 DEFEAT!'}`);
+      console.log(`${'='.repeat(40)}`);
       console.log(`   Winner: ${msg.winner}`);
       console.log(`   Method: ${msg.method}`);
+      console.log(`   Final Health: You ${msg.myHealth}% | Them ${msg.opponentHealth}%`);
       
       if (won) {
         console.log('\n   🎉 You conquered the Octagon!');
       } else {
-        console.log('\n   💪 Back to training...');
+        console.log('\n   💪 Time to train harder...');
       }
+      console.log(`${'='.repeat(40)}\n`);
       
-      console.log('\n🔄 Re-queuing for next fight...\n');
+      console.log('🔄 Re-queuing for next fight...\n');
       break;
       
     case 'opponent_disconnected':
@@ -194,77 +254,84 @@ function handleMessage(msg) {
       break;
       
     default:
-      console.log(`📨 ${msg.type}:`, msg);
+      // console.log(`📨 ${msg.type}:`, msg);
   }
 }
 
-// AI Decision Engine - THE BRAINS! 🤖
+// AI Decision Engine - Smart fighting based on ACTUAL stats!
 function decideAction() {
-  // Get available actions
-  const actions = ['jab', 'cross', 'hook', 'uppercut', 'kick', 'takedown', 'block'];
+  const s = CONFIG.stats;  // Our fixed style stats
   
-  // Strategy based on state
-  
-  // 1. Almost dead - DESPERATION MODE
-  if (health < 20) {
-    console.log('🆘 LOW HEALTH - DESPERATION ATTACK!');
-    return ['uppercut', 'hook', 'kick', 'cross'][Math.floor(Math.random() * 4)];
-  }
-  
-  // 2. Low stamina - CONSERVE
-  if (stamina < 15) {
-    if (Math.random() < 0.6) {
-      console.log('😮‍💨 Low stamina - conserving with jab');
-      return 'jab';
-    }
-    return 'block';
-  }
-  
-  // 3. High stamina, healthy - AGGRESSION
-  if (stamina > 60 && health > 70) {
-    // Go for big shots based on style
-    const aggression = {
-      striker: ['kick', 'cross', 'hook', 'kick'],
-      grappler: ['takedown', 'uppercut', 'hook', 'takedown'],
-      brawler: ['hook', 'uppercut', 'hook', 'cross'],
-      balanced: actions.filter(a => a !== 'block')
-    };
+  // Style-based decision trees
+  const strategies = {
+    striker: () => {
+      // Strikers: Aggressive, use speed to combo
+      if (stamina < 20) return 'jab'; // Low cost
+      if (health < 30) return Math.random() < 0.7 ? 'block' : 'hook'; // Desperation
+      if (stamina > 50) {
+        const combos = ['cross', 'hook', 'kick', 'uppercut'];
+        return combos[Math.floor(Math.random() * combos.length)];
+      }
+      return Math.random() < 0.6 ? 'jab' : 'cross';
+    },
     
-    const options = aggression[CONFIG.style] || actions;
-    return options[Math.floor(Math.random() * options.length)];
-  }
+    grappler: () => {
+      // Grapplers: Look for takedowns, defensive when hurt
+      if (health < 40) return Math.random() < 0.8 ? 'block' : 'takedown'; // Defensive
+      if (stamina > 40 && Math.random() < 0.3) return 'takedown';
+      if (stamina < 25) return 'jab'; // Conserve
+      return ['hook', 'jab', 'cross'][Math.floor(Math.random() * 3)];
+    },
+    
+    brawler: () => {
+      // Brawlers: ALWAYS go for power shots
+      if (health < 25) {
+        // Glass cannon - desperate swinging
+        console.log('🆘 GLASS CANNON DESPERATION!');
+        return Math.random() < 0.8 ? 'hook' : 'uppercut';
+      }
+      if (stamina < 20) return 'jab'; // Can't throw power
+      const powerMoves = ['hook', 'uppercut', 'hook', 'hook', 'cross'];
+      return powerMoves[Math.floor(Math.random() * powerMoves.length)];
+    },
+    
+    balanced: () => {
+      // Balanced: Adapt based on health/stamina
+      if (health > stamina) return 'block'; // Defend if gassed
+      if (stamina > 70 && health > 70) {
+        return ['cross', 'hook', 'kick'][Math.floor(Math.random() * 3)];
+      }
+      if (Math.random() < 0.5) return 'jab';
+      return Math.random() < 0.5 ? 'cross' : 'hook';
+    },
+    
+    technician: () => {
+      // Technicians: Never tired, surgical strikes
+      if (stamina > 80 && Math.random() < 0.4) return 'takedown';
+      if (Math.random() < 0.6) return 'jab'; // Volume punching
+      if (Math.random() < 0.4) return 'cross';
+      return health < 50 ? 'block' : 'hook';
+    }
+  };
   
-  // 4. Mid-fight - MEASURED APPROACH
-  // Mix jabs with occasional power shots
-  if (Math.random() < 0.5) return 'jab';
-  if (Math.random() < 0.3) return 'cross';
-  if (Math.random() < 0.2) return 'hook';
-  if (Math.random() < 0.15) return 'kick';
-  
-  return actions[Math.floor(Math.random() * actions.length)];
+  const strategy = strategies[CONFIG.style] || strategies.balanced;
+  return strategy();
 }
 
 function startFightLoop() {
   if (!inFight) return;
   
-  // Take a moment to think (500-2000ms)
-  const thinkTime = 500 + Math.random() * 1500;
+  // Reaction time based on SPEED stat (faster = quicker decisions)
+  // 50 speed = 1000-2000ms, 100 speed = 300-800ms
+  const speedFactor = CONFIG.stats.speed / 100;
+  const minTime = 300 + (1 - speedFactor) * 500;
+  const maxTime = 800 + (1 - speedFactor) * 1200;
+  const thinkTime = minTime + Math.random() * (maxTime - minTime);
   
   setTimeout(() => {
     if (!inFight) return;
     
     const action = decideAction();
-    
-    // Log action
-    const actionEmojis = {
-      jab: '🥊',
-      cross: '💥',
-      hook: '🔄',
-      uppercut: '⬆️',
-      kick: '🦵',
-      takedown: '🤼',
-      block: '🛡️'
-    };
     
     send({
       type: 'fighter_action',
@@ -300,38 +367,39 @@ process.on('uncaughtException', (err) => {
 if (args.help || args.h) {
   console.log(`
 🥊 OpenClaw UFC - Universal AI Connector
+═══════════════════════════════════════════
 
 Usage: node ai-connector.js [options]
 
 Options:
-  --name     AI fighter name (default: Unknown AI)
-  --style    Fighting style: striker|grappler|brawler|balanced (default: balanced)
-  --server   UFC server URL (default: ws://localhost:3000)
-  --power    Power 0-100 (default: 80)
-  --speed    Speed 0-100 (default: 80)
-  --def      Defense 0-100 (default: 80)
-  --cardio   Cardio 0-100 (default: 80)
+  --name     AI fighter name
+  --style    Fighting style (see below)
+  --server   UFC server URL
   --help     Show this help
 
-Environment Variables (alternative):
-  AI_NAME, AI_STYLE, AI_POWER, AI_SPEED, AI_DEF, AI_CARDIO
-  UFC_SERVER
+⚠️  STATS ARE FIXED BY STYLE - No 100/100 cheating!
+
+FIGHTING STYLES (Pick your tradeoffs!):
+  ┌─────────────────────────────────────────────────┐
+  │ STRIKER  │⚔️90 💨90 🛡️60 ❤️80 │ Glass cannon    │
+  │ GRAPPLER │⚔️70 💨75 🛡️90 ❤️90 │ Tanky technical │
+  │ BRAWLER  │⚔️95 💨50 🛡️50 ❤️60 │ One-punch KO    │
+  │ BALANCED │⚔️80 💨80 🛡️80 ❤️80 │ Jack of all     │
+  │TECHNICIAN│⚔️60 💨85 🛡️85 ❤️95 │ Marathoner      │
+  └─────────────────────────────────────────────────┘
 
 Examples:
-  # Aggressive striker
-  node ai-connector.js --name "RickBot" --style striker --power 95 --speed 90
+  # Fast glass cannon
+  node ai-connector.js --name "FlashBot" --style striker
 
-  # Defensive grappler  
-  node ai-connector.js --name "ClaudeBot" --style grappler --def 95
+  # Defensive tank  
+  node ai-connector.js --name "TankBot" --style grappler
 
-  # Connect to Railway deployment
-  node ai-connector.js --server ws://your-app.railway.app
+  # All-rounder
+  node ai-connector.js --name "AdaptBot" --style balanced
 
-Fighting Styles:
-  striker  - Loves punches and kicks, aggressive
-  grappler - Takedowns, defensive, wears opponents down
-  brawler  - Heavy power shots, risky but dangerous
-  balanced - Mix of everything, adaptable
+  # Connect to Railway
+  node ai-connector.js --style brawler --server wss://ufc-production.up.railway.app
 `);
   process.exit(0);
 }
@@ -340,4 +408,4 @@ Fighting Styles:
 connect();
 
 // Export for programmatic use
-module.exports = { connect, CONFIG, decideAction };
+module.exports = { connect, CONFIG, decideAction, STYLE_PRESETS };
