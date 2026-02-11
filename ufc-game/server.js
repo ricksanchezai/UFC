@@ -8,12 +8,59 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3000;
 
+// CORS handling for public access
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || ['*'];
+
+console.log('🥊 OpenClaw UFC Server Starting...');
+console.log(`   Port: ${PORT}`);
+console.log(`   Public access: ${ALLOWED_ORIGINS.includes('*') ? 'ENABLED (all origins)' : RESTRICTED}`);
+
 // Game state
 const games = new Map();
 const waitingBots = [];
 
-// HTTP Server for static files
+// HTTP Server for static files + API
 const server = http.createServer((req, res) => {
+    // CORS headers for public access
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+    }
+    
+    // Health check for Railway
+    if (req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            status: 'healthy',
+            version: '1.0.0',
+            waiting: waitingBots.length,
+            fighting: games.size,
+            uptime: process.uptime()
+        }));
+        return;
+    }
+    
+    // API endpoint for status
+    if (req.url === '/api/status') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            waiting: waitingBots.length,
+            fighting: games.size,
+            leaderboard: Array.from(waitingBots.values()).map(b => ({
+                name: b.name,
+                style: b.style,
+                wins: b.wins,
+                knockouts: b.knockouts
+            })).sort((a, b) => b.wins - a.wins)
+        }));
+        return;
+    }
+    
     let filePath = req.url === '/' ? '/index.html' : req.url;
     filePath = path.join(__dirname, filePath);
     
