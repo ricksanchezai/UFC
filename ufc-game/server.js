@@ -18,6 +18,15 @@ console.log(`   Public access: ${ALLOWED_ORIGINS.includes('*') ? 'ENABLED (all o
 // Game state
 const games = new Map();
 const waitingBots = [];
+const matchHistory = [];
+const leaderboard = new Map();
+
+// Stats
+let stats = {
+    totalFights: 0,
+    totalKOs: 0,
+    activeFights: 0
+};
 
 // HTTP Server for static files + API
 const server = http.createServer((req, res) => {
@@ -51,13 +60,40 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({
             waiting: waitingBots.length,
             fighting: games.size,
-            leaderboard: Array.from(waitingBots.values()).map(b => ({
-                name: b.name,
-                style: b.style,
-                wins: b.wins,
-                knockouts: b.knockouts
-            })).sort((a, b) => b.wins - a.wins)
+            totalFights: stats.totalFights,
+            totalKOs: stats.totalKOs,
+            leaderboard: Array.from(leaderboard.values())
+                .sort((a, b) => b.wins - a.wins)
+                .slice(0, 10)
         }));
+        return;
+    }
+    
+    // API endpoint for leaderboard
+    if (req.url === '/api/leaderboard') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            leaderboard: Array.from(leaderboard.values())
+                .sort((a, b) => (b.wins * 3 + b.knockouts) - (a.wins * 3 + a.knockouts))
+                .slice(0, 20),
+            stats: stats
+        }));
+        return;
+    }
+    
+    // API endpoint for live fights
+    if (req.url === '/api/live') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        const liveFights = Array.from(games.values()).map(g => ({
+            id: g.id,
+            fighter1: g.fighter1?.name,
+            fighter2: g.fighter2?.name,
+            round: g.round,
+            time: g.time,
+            health1: g.health1,
+            health2: g.health2
+        }));
+        res.end(JSON.stringify({ fights: liveFights }));
         return;
     }
     
@@ -342,6 +378,28 @@ function endFight(game, winner) {
     const loser = winner.id === game.fighter1.id ? game.fighter2 : game.fighter1;
     loser.losses++;
     
+    // Update global stats
+    stats.totalFights++;
+    if (game.health1 <= 0 || game.health2 <= 0) {
+        stats.totalKOs++;
+    }
+    
+    // Update leaderboard
+    updateLeaderboard(winner);
+    updateLeaderboard(loser);
+    
+    // Record match
+    matchHistory.push({
+        id: game.id,
+        winner: winner.name,
+        winnerId: winner.id,
+        loser: loser.name,
+        loserId: loser.id,
+        method: game.health1 <= 0 || game.health2 <= 0 ? 'KO' : 'DECISION',
+        round: game.round,
+        time: new Date().toISOString()
+    });
+    
     broadcastToGame(game, {
         type: 'fight_end',
         winner: winner.name,
@@ -355,6 +413,19 @@ function endFight(game, winner) {
     setTimeout(() => {
         games.delete(game.id);
     }, 10000);
+}
+
+function updateLeaderboard(bot) {
+    leaderboard.set(bot.id, {
+        id: bot.id,
+        name: bot.name,
+        style: bot.style,
+        wins: bot.wins || 0,
+        losses: bot.losses || 0,
+        knockouts: bot.knockouts || 0,
+        winRate: bot.wins + bot.losses > 0 ? 
+            Math.round((bot.wins / (bot.wins + bot.losses)) * 100) : 0
+    });
 }
 
 function broadcastToGame(game, msg) {
