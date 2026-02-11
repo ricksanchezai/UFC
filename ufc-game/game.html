@@ -409,8 +409,30 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <script src="src/game-pro.js"></script>
     <script>
+        // Initialize when loaded
+        window.onload = function() {
+            init();
+            console.log('🥊 UFC Game initialized!');
+        };
+
         function goBack() {
             window.location.href = '/';
+        }
+
+        let currentFighter1 = null;
+        let currentFighter2 = null;
+
+        function startEntrance() {
+            if (typeof startGame === 'function') {
+                startGame('rick', 'claude');
+            } else {
+                // Manual fallback
+                document.getElementById('entrance-screen').classList.add('hidden');
+                if (typeof createFighter === 'function') {
+                    currentFighter1 = createFighter(FIGHTERS[0], false);
+                    currentFighter2 = createFighter(FIGHTERS[1], true);
+                }
+            }
         }
     </script>
 </body>
