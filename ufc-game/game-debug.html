@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>UFC DEBUG</title>
+    <style>
+        body { margin: 0; background: #000; color: #0f0; font-family: monospace; overflow: hidden; }
+        #log { position: absolute; top: 10px; left: 10px; z-index: 1000; max-width: 400px; }
+        #game { width: 100vw; height: 100vh; }
+        #startBtn {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 20px 40px; font-size: 24px; background: #d90000; color: #fff;
+            border: none; cursor: pointer; z-index: 1001;
+        }
+    </style>
+</head>
+<body>
+    <div id="log">Loading...</div>
+    <button id="startBtn" onclick="start()">START FIGHT</button>
+    <div id="game"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        function log(msg) {
+            document.getElementById('log').innerHTML += '<br>' + msg;
+            console.log(msg);
+        }
+
+        let scene, camera, renderer, fighter1, fighter2;
+
+        function init() {
+            log('INIT START');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111);
+            
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 15);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('game').appendChild(renderer.domElement);
+            
+            // Light
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(0, 10, 10);
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x404040));
+            
+            // Floor
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(30, 30),
+                new THREE.MeshStandardMaterial({ color: 0x222222 })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+            
+            // Octagon ring
+            const ring = new THREE.Mesh(
+                new THREE.CylinderGeometry(8, 8, 0.2, 8),
+                new THREE.MeshStandardMaterial({ color: 0x333333 })
+            );
+            ring.position.y = 0.1;
+            scene.add(ring);
+            
+            log('INIT DONE - Scene ready');
+            render();
+        }
+
+        function createFighter(color, x) {
+            const group = new THREE.Group();
+            
+            // Body
+            const body = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.5, 0.4, 1.5, 8),
+                new THREE.MeshStandardMaterial({ color: color })
+            );
+            body.position.y = 0.75;
+            group.add(body);
+            
+            // Head
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.35, 16, 16),
+                new THREE.MeshStandardMaterial({ color: 0xffccaa })
+            );
+            head.position.y = 1.7;
+            group.add(head);
+            
+            group.position.set(x, 0, 0);
+            scene.add(group);
+            
+            log('Fighter created at x=' + x);
+            return group;
+        }
+
+        function start() {
+            log('START CLICKED');
+            document.getElementById('startBtn').style.display = 'none';
+            
+            fighter1 = createFighter(0x00ff88, -3);
+            fighter2 = createFighter(0xcc66ff, 3);
+            
+            log('Fighters created - starting battle...');
+            battleLoop();
+        }
+
+        function battleLoop() {
+            if (!fighter1 || !fighter2) return;
+            
+            // Simple punch animation
+            const time = Date.now() * 0.001;
+            fighter1.position.y = Math.abs(Math.sin(time * 5)) * 0.5;
+            fighter2.position.y = Math.abs(Math.cos(time * 5)) * 0.5;
+            
+            // Face each other
+            fighter1.lookAt(fighter2.position);
+            fighter2.lookAt(fighter1.position);
+            
+            requestAnimationFrame(battleLoop);
+        }
+
+        function render() {
+            requestAnimationFrame(render);
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        // Auto-init
+        window.onload = init;
+    </script>
+</body>
+</html>
