@@ -577,15 +577,15 @@ function startEntrance() {
         ease: "power2.inOut"
     }, 4.5);
     
-    // Touch gloves - move to center
+    // Touch gloves - move to center (closer so they can immediately fight)
     tl.to(fighters[0].position, {
-        x: -1.8, z: 0,
+        x: -1.2, z: 0,
         duration: 1.5,
         ease: "power2.out"
     }, 5.5);
     
     tl.to(fighters[1].position, {
-        x: 1.8, z: 0,
+        x: 1.2, z: 0,
         duration: 1.5,
         ease: "power2.out"
     }, 5.5);
@@ -912,12 +912,16 @@ async function aiTakeTurn(fighterIdx) {
             break;
             
         case 'move':
-            const targetPos = opponent.position.clone();
-            targetPos.x += fighterIdx === 0 ? 2.5 : -2.5;
+            // Move TOWARD opponent, not away!
+            const direction = fighterIdx === 0 ? 1 : -1;
+            const currentX = fighter.position.x;
+            const oppX = opponent.position.x;
+            // Move 1 unit closer to opponent
+            const targetX = currentX + (oppX > currentX ? 0.8 : -0.8);
             gsap.to(fighter.position, {
-                x: targetPos.x,
-                z: targetPos.z,
-                duration: 0.4
+                x: targetX,
+                duration: 0.4,
+                ease: "power2.out"
             });
             break;
     }
