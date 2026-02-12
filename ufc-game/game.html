@@ -412,23 +412,7 @@
         function goBack() {
             window.location.href = '/';
         }
-        
-        // Start button handler - hide entrance and start fight
-        function startEntrance() {
-            console.log('🥊 Starting fight...');
-            document.getElementById('entrance-screen').style.display = 'none';
-            
-            // Create fighters if not already created
-            if (fighters.length === 0) {
-                createFighter(FIGHTERS[0], false);  // Rick
-                createFighter(FIGHTERS[1], true);   // Claude
-            }
-            
-            // Start the fight after brief delay
-            setTimeout(() => {
-                startFight();
-            }, 1000);
-        }
+        // startEntrance() and startFight() are defined in game-pro.js
     </script>
 </body>
 </html>
