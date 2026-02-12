@@ -57,6 +57,87 @@ let particleSystem, impactEffects = [];
 let gameState = { isPlaying: false, round: 1, time: CONFIG.ROUND_TIME };
 let clock = new THREE.Clock();
 
+// 🧠 AI LEARNING SYSTEM - Fighters learn from experience
+const AI_MEMORY = {
+    // Each fighter remembers what worked
+    rick: { fights: 0, wins: 0, moveSuccess: {}, opponentPatterns: {} },
+    claude: { fights: 0, wins: 0, moveSuccess: {}, opponentPatterns: {} },
+    gpt: { fights: 0, wins: 0, moveSuccess: {}, opponentPatterns: {} },
+    gemini: { fights: 0, wins: 0, moveSuccess: {}, opponentPatterns: {} }
+};
+
+// Load AI memory from localStorage if exists
+function loadAIMemory() {
+    const saved = localStorage.getItem('ufc_ai_memory');
+    if (saved) {
+        const data = JSON.parse(saved);
+        Object.assign(AI_MEMORY, data);
+        console.log('🧠 AI Memory loaded:', AI_MEMORY);
+    }
+}
+
+// Save AI memory
+function saveAIMemory() {
+    localStorage.setItem('ufc_ai_memory', JSON.stringify(AI_MEMORY));
+}
+
+// Record move outcome for learning
+function recordMoveOutcome(fighterId, move, damage, hit, opponentId) {
+    if (!AI_MEMORY[fighterId]) return;
+    
+    const memory = AI_MEMORY[fighterId];
+    if (!memory.moveSuccess[move]) {
+        memory.moveSuccess[move] = { attempts: 0, hits: 0, totalDamage: 0 };
+    }
+    
+    memory.moveSuccess[move].attempts++;
+    if (hit) {
+        memory.moveSuccess[move].hits++;
+        memory.moveSuccess[move].totalDamage += damage;
+    }
+    
+    // Learn opponent patterns
+    if (!memory.opponentPatterns[opponentId]) {
+        memory.opponentPatterns[opponentId] = { movesUsed: {}, healthAtStart: 100 };
+    }
+}
+
+// Get learned weights for move selection
+function getLearnedWeights(fighterId, opponentId, baseWeights) {
+    const memory = AI_MEMORY[fighterId];
+    if (!memory) return baseWeights;
+    
+    const weights = { ...baseWeights };
+    
+    // Adjust weights based on success rate
+    Object.keys(memory.moveSuccess).forEach(move => {
+        const stats = memory.moveSuccess[move];
+        if (stats.attempts >= 3) { // Need enough data
+            const successRate = stats.hits / stats.attempts;
+            const avgDamage = stats.totalDamage / stats.attempts;
+            
+            // Boost successful moves
+            if (weights[move] && successRate > 0.5) {
+                weights[move] *= (1 + successRate * 0.5);
+                console.log(`🧠 ${fighterId} learned ${move} works ${(successRate*100).toFixed(0)}% of the time`);
+            }
+        }
+    });
+    
+    // Adapt to opponent patterns
+    if (memory.opponentPatterns[opponentId]) {
+        const opp = memory.opponentPatterns[opponentId];
+        // If opponent blocks often, be more patient
+        // If opponent attacks aggressively, counter-attack
+    }
+    
+    // Normalize weights
+    const total = Object.values(weights).reduce((a, b) => a + b, 0);
+    Object.keys(weights).forEach(k => weights[k] /= total);
+    
+    return weights;
+}
+
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x050505);
@@ -338,6 +419,7 @@ function updateParticles() {
 function createProFighter(data, isRightSide) {
     const group = new THREE.Group();
     group.userData = {
+        id: data.id,  // 🧠 Store ID for AI learning
         name: data.name,
         health: CONFIG.HEALTH,
         stamina: CONFIG.STAMINA,
@@ -863,13 +945,14 @@ async function aiTakeTurn(fighterIdx) {
     const fighter = fighters[fighterIdx];
     const opponent = fighters[fighterIdx === 0 ? 1 : 0];
     const data = fighter.userData;
+    const oppData = opponent.userData;
     
     if (data.isStunned || data.health <= 0) return;
     
     const dist = fighter.position.distanceTo(opponent.position);
     
-    // Decide action based on style and state
-    const action = selectAIAction(data, dist);
+    // 🧠 Decide action using LEARNED behavior
+    const action = selectAIAction(data, dist, oppData.id);
     
     // Execute with animation
     let damage = 0;
@@ -913,7 +996,6 @@ async function aiTakeTurn(fighterIdx) {
             
         case 'move':
             // Move TOWARD opponent, not away!
-            const direction = fighterIdx === 0 ? 1 : -1;
             const currentX = fighter.position.x;
             const oppX = opponent.position.x;
             // Move 1 unit closer to opponent
@@ -925,6 +1007,9 @@ async function aiTakeTurn(fighterIdx) {
             });
             break;
     }
+    
+    // 🧠 LEARN from this move outcome
+    recordMoveOutcome(data.id, action, damage, landed, oppData.id);
     
     // Apply damage
     if (damage > 0 && landed) {
@@ -940,21 +1025,32 @@ async function aiTakeTurn(fighterIdx) {
     data.stamina = Math.max(0, data.stamina - (damage > 0 ? 8 : 3));
 }
 
-function selectAIAction(data, dist) {
+function selectAIAction(data, dist, opponentId) {
     const rand = Math.random();
     
     if (dist > 3) return 'move';
     if (data.stamina < 15) return Math.random() > 0.5 ? 'jab' : 'move';
     if (data.health < 25 && rand < 0.6) return 'uppercut';
     
-    const weights = {
+    // Base weights by fighting style
+    const baseWeights = {
         striker: { jab: 0.3, cross: 0.25, hook: 0.2, kick: 0.2, uppercut: 0.05 },
         grappler: { jab: 0.2, cross: 0.2, hook: 0.3, kick: 0.1, uppercut: 0.2 },
         brawler: { jab: 0.1, cross: 0.2, hook: 0.3, kick: 0.1, uppercut: 0.3 },
         balanced: { jab: 0.25, cross: 0.25, hook: 0.2, kick: 0.2, uppercut: 0.1 }
     };
     
-    const w = weights[data.style] || weights.balanced;
+    // 🧠 Apply learned weights from AI memory
+    let w = getLearnedWeights(data.id, opponentId, baseWeights[data.style] || baseWeights.balanced);
+    
+    // Dynamic adaptation based on fight state
+    if (data.health < 40) {
+        w.jab *= 1.5; w.uppercut *= 0.5;
+    }
+    if (data.stamina > 80) {
+        w.cross *= 1.3; w.kick *= 1.2;
+    }
+    
     const total = w.jab + w.cross + w.hook + w.kick + w.uppercut;
     const r = Math.random() * total;
     
@@ -972,6 +1068,17 @@ function endFight(winnerIdx) {
     
     animateKnockout(loser);
     showCommentary(`${winner.userData.name} WINS BY KO!`, 5000);
+    
+    // 🧠 LEARN: Record win and save memory
+    if (AI_MEMORY[winner.userData.id]) {
+        AI_MEMORY[winner.userData.id].wins++;
+        AI_MEMORY[winner.userData.id].fights++;
+        console.log(`🧠 ${winner.userData.name} learned from victory! Total wins: ${AI_MEMORY[winner.userData.id].wins}`);
+    }
+    if (AI_MEMORY[loser.userData.id]) {
+        AI_MEMORY[loser.userData.id].fights++;
+    }
+    saveAIMemory();
     
     setTimeout(() => {
         document.getElementById('winner-name').textContent = winner.userData.name;
@@ -1058,4 +1165,5 @@ window.addEventListener('resize', () => {
 });
 
 // Auto-init when script loads
+loadAIMemory(); // 🧠 Load AI learning data
 init();
